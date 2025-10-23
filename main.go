@@ -32,6 +32,13 @@ func NewProduct(name string, price float64) *Product {
 }
 
 func main() {
+	// Check command line arguments
+	if len(os.Args) > 1 && os.Args[1] == "web" {
+		StartWebServer()
+		return
+	}
+
+	// Default CLI mode
 	connStr := "postgres://postgres:secret@localhost:5432/gopgtest?sslmode=disable"
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {

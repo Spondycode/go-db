@@ -410,9 +410,10 @@ func updateProductByID(db *sql.DB, id int) error {
 		availableInput := strings.TrimSpace(scanner.Text())
 		if availableInput != "" {
 			availableInput = strings.ToLower(availableInput)
-			if availableInput == "y" || availableInput == "yes" {
+			switch availableInput {
+			case "y", "yes":
 				product.Available = true
-			} else if availableInput == "n" || availableInput == "no" {
+			case "n", "no":
 				product.Available = false
 			}
 		}

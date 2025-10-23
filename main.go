@@ -175,11 +175,7 @@ func addProduct(db *sql.DB, product *Product) error {
 	return nil
 }
 
-// addProductIfNotExists is a convenience function that creates and adds a product if it doesn't exist
-func addProductIfNotExists(db *sql.DB, name string, price float64) error {
-	product := NewProduct(name, price)
-	return addProduct(db, product)
-} // showAllProducts retrieves and displays all products from the database
+// showAllProducts retrieves and displays all products from the database
 func showAllProducts(db *sql.DB) {
 	query := `
 	SELECT id, name, price, available, date_created 

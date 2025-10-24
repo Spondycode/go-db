@@ -19,14 +19,36 @@
                     <div class="flex items-center">
                         <h1 class="text-2xl font-bold text-gray-900">🛍️ Product Management</h1>
                     </div>
-                    <button 
-                        onclick="openAddModal()" 
-                        class="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
-                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                        </svg>
-                        Add Product
-                    </button>
+                    <div class="flex items-center space-x-4">
+                        <!-- User info and actions (visible when logged in) -->
+                        <div id="user-section" class="hidden items-center space-x-4">
+                            <span id="user-welcome" class="text-sm text-gray-700"></span>
+                            <button 
+                                onclick="openAddModal()" 
+                                class="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                </svg>
+                                Add Product
+                            </button>
+                            <button 
+                                onclick="logout()" 
+                                class="inline-flex items-center px-3 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                                </svg>
+                                Logout
+                            </button>
+                        </div>
+                        
+                        <!-- Login/Signup buttons (visible when not logged in) -->
+                        <div id="auth-section" class="flex items-center space-x-3">
+                            <a href="/login" class="text-gray-600 hover:text-gray-900 text-sm font-medium transition-colors">Sign In</a>
+                            <a href="/signup" class="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                                Sign Up
+                            </a>
+                        </div>
+                    </div>
                 </div>
             </div>
         </header>
@@ -196,11 +218,75 @@
 
     <script>
         let products = [];
+        let currentUser = null;
 
-        // Load products on page load
+        // Load products and check authentication on page load
         document.addEventListener('DOMContentLoaded', function() {
-            loadProducts();
+            checkAuthentication();
         });
+
+        // Authentication Functions
+        async function checkAuthentication() {
+            try {
+                const response = await fetch('/auth/me');
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    currentUser = result.data;
+                    showUserSection();
+                    loadProducts();
+                } else {
+                    showAuthSection();
+                    // Still load products but they won't be able to modify
+                    loadProducts();
+                }
+            } catch (error) {
+                console.log('Not authenticated');
+                showAuthSection();
+                loadProducts();
+            }
+        }
+
+        function showUserSection() {
+            const userSection = document.getElementById('user-section');
+            const authSection = document.getElementById('auth-section');
+            const userWelcome = document.getElementById('user-welcome');
+            
+            userWelcome.textContent = `Welcome, ${currentUser.username}${currentUser.is_admin ? ' (Admin)' : ''}`;
+            
+            userSection.classList.remove('hidden');
+            userSection.classList.add('flex');
+            authSection.classList.add('hidden');
+        }
+
+        function showAuthSection() {
+            const userSection = document.getElementById('user-section');
+            const authSection = document.getElementById('auth-section');
+            
+            userSection.classList.add('hidden');
+            userSection.classList.remove('flex');
+            authSection.classList.remove('hidden');
+        }
+
+        async function logout() {
+            try {
+                const response = await fetch('/auth/logout', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentUser = null;
+                    showAuthSection();
+                    showToast('Logged out successfully!', 'success');
+                } else {
+                    showToast('Logout failed: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showToast('Logout error: ' + error.message, 'error');
+            }
+        }
 
         // API Functions
         async function loadProducts() {
@@ -222,6 +308,11 @@
         }
 
         async function addProduct() {
+            if (!currentUser) {
+                showToast('Please log in to add products', 'error');
+                return;
+            }
+
             const form = document.getElementById('add-product-form');
             const formData = new FormData(form);
             
@@ -256,6 +347,11 @@
         }
 
         async function updateProduct() {
+            if (!currentUser) {
+                showToast('Please log in to update products', 'error');
+                return;
+            }
+
             const form = document.getElementById('edit-product-form');
             const formData = new FormData(form);
             const id = formData.get('id');
@@ -290,6 +386,11 @@
         }
 
         async function deleteProduct(id, name) {
+            if (!currentUser) {
+                showToast('Please log in to delete products', 'error');
+                return;
+            }
+
             if (!confirm(`Are you sure you want to delete "${name}"?`)) {
                 return;
             }
@@ -341,16 +442,24 @@
                         ${new Date(product.date_created).toLocaleDateString()}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <button onclick="openEditModal(${product.id})" 
-                                class="text-blue-600 hover:text-blue-900 mr-3 transition-colors">Edit</button>
-                        <button onclick="deleteProduct(${product.id}, '${product.name.replace(/'/g, "\\'")}')" 
-                                class="text-red-600 hover:text-red-900 transition-colors">Delete</button>
+                        ${currentUser ? `
+                            <button onclick="openEditModal(${product.id})" 
+                                    class="text-blue-600 hover:text-blue-900 mr-3 transition-colors">Edit</button>
+                            <button onclick="deleteProduct(${product.id}, '${product.name.replace(/'/g, "\\'")}')" 
+                                    class="text-red-600 hover:text-red-900 transition-colors">Delete</button>
+                        ` : `
+                            <span class="text-gray-400">Login to manage</span>
+                        `}
                     </td>
                 </tr>
             `).join('');
         }
 
         function openAddModal() {
+            if (!currentUser) {
+                showToast('Please log in to add products', 'error');
+                return;
+            }
             document.getElementById('add-modal').classList.add('show');
         }
 
@@ -359,6 +468,11 @@
         }
 
         function openEditModal(id) {
+            if (!currentUser) {
+                showToast('Please log in to edit products', 'error');
+                return;
+            }
+
             const product = products.find(p => p.id === id);
             if (!product) return;
 

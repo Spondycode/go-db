@@ -23,9 +23,16 @@
                         <!-- User info and actions (visible when logged in) -->
                         <div id="user-section" class="hidden items-center space-x-4">
                             <span id="user-welcome" class="text-sm text-gray-700"></span>
+                            <a id="admin-link" href="/admin" class="hidden items-center px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-colors">
+                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                                </svg>
+                                Admin Panel
+                            </a>
                             <button 
+                                id="add-product-btn"
                                 onclick="openAddModal()" 
-                                class="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                                class="hidden items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
                                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
                                 </svg>
@@ -98,13 +105,17 @@
                 <h3 class="mt-4 text-lg font-medium text-gray-900">No products found</h3>
                 <p class="mt-2 text-sm text-gray-500">Get started by adding your first product.</p>
                 <button 
+                    id="add-first-product-btn"
                     onclick="openAddModal()" 
-                    class="mt-6 inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                    class="hidden mt-6 items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
                     <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
                     </svg>
                     Add First Product
                 </button>
+                <div id="non-admin-empty-message" class="hidden mt-6 text-gray-500">
+                    <p>No products available. Only administrators can add new products.</p>
+                </div>
             </div>
         </main>
     </div>
@@ -251,8 +262,23 @@
             const userSection = document.getElementById('user-section');
             const authSection = document.getElementById('auth-section');
             const userWelcome = document.getElementById('user-welcome');
+            const adminLink = document.getElementById('admin-link');
+            const addProductBtn = document.getElementById('add-product-btn');
             
             userWelcome.textContent = `Welcome, ${currentUser.username}${currentUser.is_admin ? ' (Admin)' : ''}`;
+            
+            // Show admin-only elements if user is admin
+            if (currentUser.is_admin) {
+                adminLink.classList.remove('hidden');
+                adminLink.classList.add('inline-flex');
+                addProductBtn.classList.remove('hidden');
+                addProductBtn.classList.add('inline-flex');
+            } else {
+                adminLink.classList.add('hidden');
+                adminLink.classList.remove('inline-flex');
+                addProductBtn.classList.add('hidden');
+                addProductBtn.classList.remove('inline-flex');
+            }
             
             userSection.classList.remove('hidden');
             userSection.classList.add('flex');
@@ -310,6 +336,11 @@
         async function addProduct() {
             if (!currentUser) {
                 showToast('Please log in to add products', 'error');
+                return;
+            }
+
+            if (!currentUser.is_admin) {
+                showToast('Admin rights required to add products', 'error');
                 return;
             }
 
@@ -391,6 +422,11 @@
                 return;
             }
 
+            if (!currentUser.is_admin) {
+                showToast('Admin rights required to delete products', 'error');
+                return;
+            }
+
             if (!confirm(`Are you sure you want to delete "${name}"?`)) {
                 return;
             }
@@ -418,10 +454,23 @@
             const container = document.getElementById('products-container');
             const emptyState = document.getElementById('empty-state');
             const tbody = document.getElementById('products-table-body');
+            const addFirstBtn = document.getElementById('add-first-product-btn');
+            const nonAdminMessage = document.getElementById('non-admin-empty-message');
 
             if (products.length === 0) {
                 container.classList.add('hidden');
                 emptyState.classList.remove('hidden');
+                
+                // Show appropriate empty state based on user status
+                if (currentUser && currentUser.is_admin) {
+                    addFirstBtn.classList.remove('hidden');
+                    addFirstBtn.classList.add('inline-flex');
+                    nonAdminMessage.classList.add('hidden');
+                } else {
+                    addFirstBtn.classList.add('hidden');
+                    addFirstBtn.classList.remove('inline-flex');
+                    nonAdminMessage.classList.remove('hidden');
+                }
                 return;
             }
 
@@ -445,8 +494,12 @@
                         ${currentUser ? `
                             <button onclick="openEditModal(${product.id})" 
                                     class="text-blue-600 hover:text-blue-900 mr-3 transition-colors">Edit</button>
-                            <button onclick="deleteProduct(${product.id}, '${product.name.replace(/'/g, "\\'")}')" 
-                                    class="text-red-600 hover:text-red-900 transition-colors">Delete</button>
+                            ${currentUser.is_admin ? `
+                                <button onclick="deleteProduct(${product.id}, '${product.name.replace(/'/g, "\\'")}')" 
+                                        class="text-red-600 hover:text-red-900 transition-colors">Delete</button>
+                            ` : `
+                                <span class="text-gray-400">Admin only</span>
+                            `}
                         ` : `
                             <span class="text-gray-400">Login to manage</span>
                         `}
@@ -460,6 +513,12 @@
                 showToast('Please log in to add products', 'error');
                 return;
             }
+            
+            if (!currentUser.is_admin) {
+                showToast('Admin rights required to add products', 'error');
+                return;
+            }
+            
             document.getElementById('add-modal').classList.add('show');
         }
 

@@ -93,6 +93,7 @@ func (s *Server) setupRoutes() *mux.Router {
 	r.HandleFunc("/", s.handleHome).Methods("GET")
 	r.HandleFunc("/login", s.handleLoginPage).Methods("GET")
 	r.HandleFunc("/signup", s.handleSignupPage).Methods("GET")
+	r.HandleFunc("/admin", s.handleAdminPage).Methods("GET")
 
 	// Authentication API routes
 	auth := r.PathPrefix("/auth").Subrouter()
@@ -100,6 +101,11 @@ func (s *Server) setupRoutes() *mux.Router {
 	auth.HandleFunc("/signup", s.handleSignup).Methods("POST")
 	auth.HandleFunc("/logout", s.handleLogout).Methods("POST")
 	auth.HandleFunc("/me", s.handleGetCurrentUser).Methods("GET")
+
+	// Admin API routes
+	adminAPI := r.PathPrefix("/api/admin").Subrouter()
+	adminAPI.HandleFunc("/users", s.handleGetAllUsers).Methods("GET")
+	adminAPI.HandleFunc("/users/{id:[0-9]+}/admin", s.handleSetUserAdmin).Methods("PUT")
 
 	// API routes
 	api := r.PathPrefix("/api").Subrouter()
@@ -160,8 +166,27 @@ func (s *Server) handleGetProduct(w http.ResponseWriter, r *http.Request) {
 	s.sendJSONResponse(w, http.StatusOK, true, "Product retrieved successfully", product)
 }
 
-// handleCreateProduct creates a new product
+// handleCreateProduct creates a new product (admin only)
 func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
+	// Check authentication and admin rights
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	_, ok := session.Values["user_id"].(int)
+	if !ok {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	isAdmin, ok := session.Values["is_admin"].(bool)
+	if !ok || !isAdmin {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin rights required to add products", nil)
+		return
+	}
+
 	var req ProductRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.sendJSONResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
@@ -185,7 +210,7 @@ func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 		Available: req.Available,
 	}
 
-	err := s.addProduct(product)
+	err = s.addProduct(product)
 	if err != nil {
 		s.sendJSONResponse(w, http.StatusInternalServerError, false, "Failed to create product", nil)
 		return
@@ -240,8 +265,27 @@ func (s *Server) handleUpdateProduct(w http.ResponseWriter, r *http.Request) {
 	s.sendJSONResponse(w, http.StatusOK, true, "Product updated successfully", product)
 }
 
-// handleDeleteProduct deletes a product
+// handleDeleteProduct deletes a product (admin only)
 func (s *Server) handleDeleteProduct(w http.ResponseWriter, r *http.Request) {
+	// Check authentication and admin rights
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	_, ok := session.Values["user_id"].(int)
+	if !ok {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	isAdmin, ok := session.Values["is_admin"].(bool)
+	if !ok || !isAdmin {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin rights required to delete products", nil)
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -395,11 +439,14 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create user
+	username := strings.TrimSpace(req.Username)
+	isAdmin := (username == "Spondycode") // Make Spondycode admin automatically
+
 	user := &User{
-		Username: strings.TrimSpace(req.Username),
+		Username: username,
 		Email:    strings.TrimSpace(req.Email),
 		Password: string(hashedPassword),
-		IsAdmin:  false, // Regular users by default
+		IsAdmin:  isAdmin,
 	}
 
 	err = s.createUser(user)
@@ -476,6 +523,138 @@ func (s *Server) handleGetCurrentUser(w http.ResponseWriter, r *http.Request) {
 	// Remove password from response
 	user.Password = ""
 	s.sendJSONResponse(w, http.StatusOK, true, "User retrieved successfully", user)
+}
+
+// handleAdminPage serves the admin page
+func (s *Server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
+	// Check authentication
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	userID, ok := session.Values["user_id"].(int)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Check if user is admin
+	isAdmin, ok := session.Values["is_admin"].(bool)
+	if !ok || !isAdmin {
+		http.Error(w, "Access denied. Admin rights required.", http.StatusForbidden)
+		return
+	}
+
+	// Get current user info
+	user, err := s.getUserByID(userID)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusUnauthorized)
+		return
+	}
+
+	data := struct {
+		Title string
+		User  *User
+	}{
+		Title: "Admin Panel - Product Management System",
+		User:  user,
+	}
+
+	err = s.Templates.ExecuteTemplate(w, "admin.html", data)
+	if err != nil {
+		http.Error(w, "Error rendering template", http.StatusInternalServerError)
+		log.Printf("Template error: %v", err)
+	}
+}
+
+// handleGetAllUsers returns all users (admin only)
+func (s *Server) handleGetAllUsers(w http.ResponseWriter, r *http.Request) {
+	// Check authentication and admin rights
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	isAdmin, ok := session.Values["is_admin"].(bool)
+	if !ok || !isAdmin {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin rights required", nil)
+		return
+	}
+
+	users, err := s.getAllUsers()
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusInternalServerError, false, "Failed to retrieve users", nil)
+		return
+	}
+
+	// Remove passwords from response
+	for i := range users {
+		users[i].Password = ""
+	}
+
+	s.sendJSONResponse(w, http.StatusOK, true, "Users retrieved successfully", users)
+}
+
+// handleSetUserAdmin sets or removes admin rights for a user
+func (s *Server) handleSetUserAdmin(w http.ResponseWriter, r *http.Request) {
+	// Check authentication and admin rights
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	isAdmin, ok := session.Values["is_admin"].(bool)
+	if !ok || !isAdmin {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin rights required", nil)
+		return
+	}
+
+	// Get user ID from URL
+	vars := mux.Vars(r)
+	userID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusBadRequest, false, "Invalid user ID", nil)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		IsAdmin bool `json:"is_admin"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.sendJSONResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
+		return
+	}
+
+	// Update user admin status
+	query := `UPDATE users SET is_admin = $1 WHERE id = $2;`
+	result, err := s.DB.Exec(query, req.IsAdmin, userID)
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusInternalServerError, false, "Failed to update user", nil)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusInternalServerError, false, "Failed to update user", nil)
+		return
+	}
+
+	if rowsAffected == 0 {
+		s.sendJSONResponse(w, http.StatusNotFound, false, "User not found", nil)
+		return
+	}
+
+	action := "removed"
+	if req.IsAdmin {
+		action = "granted"
+	}
+
+	s.sendJSONResponse(w, http.StatusOK, true, fmt.Sprintf("Admin rights %s successfully", action), nil)
 }
 
 // Database methods
@@ -627,6 +806,53 @@ func (s *Server) createUser(user *User) error {
 	return err
 }
 
+// setUserAdmin sets a user as admin by username
+func (s *Server) setUserAdmin(username string, isAdmin bool) error {
+	query := `UPDATE users SET is_admin = $1 WHERE username = $2;`
+
+	result, err := s.DB.Exec(query, isAdmin, username)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
+}
+
+// getAllUsers retrieves all users (admin only)
+func (s *Server) getAllUsers() ([]User, error) {
+	query := `
+	SELECT id, username, email, is_admin, created 
+	FROM users 
+	ORDER BY created DESC;`
+
+	rows, err := s.DB.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var user User
+		err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.IsAdmin, &user.Created)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+
+	return users, rows.Err()
+}
+
 // sendJSONResponse sends a JSON response with the given status code and data
 func (s *Server) sendJSONResponse(w http.ResponseWriter, statusCode int, success bool, message string, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -659,6 +885,9 @@ func StartWebServer() {
 	// Create tables if they don't exist
 	createProductTableWeb(db)
 	createUsersTable(db)
+
+	// Make Spondycode an admin if the user exists
+	makeUserAdmin(db, "Spondycode")
 
 	// Create server
 	server := NewServer(db)
@@ -711,4 +940,27 @@ func createUsersTable(db *sql.DB) {
 	}
 
 	fmt.Println("✅ Users table ready!")
+}
+
+// makeUserAdmin sets a user as admin by username
+func makeUserAdmin(db *sql.DB, username string) {
+	query := `UPDATE users SET is_admin = true WHERE username = $1;`
+
+	result, err := db.Exec(query, username)
+	if err != nil {
+		log.Printf("Error setting user %s as admin: %v", username, err)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected for user %s: %v", username, err)
+		return
+	}
+
+	if rowsAffected > 0 {
+		fmt.Printf("✅ User %s set as admin!\n", username)
+	} else {
+		fmt.Printf("ℹ️  User %s not found (will be set as admin when they register)\n", username)
+	}
 }

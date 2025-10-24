@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="h-full bg-gray-50">
+    <div class="min-h-full">
+        <!-- Header -->
+        <header class="bg-white shadow-sm border-b">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center h-16">
+                    <div class="flex items-center">
+                        <h1 class="text-2xl font-bold text-gray-900">🛡️ Admin Panel</h1>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm text-gray-700">Welcome, {{.User.Username}} (Admin)</span>
+                        <a href="/" class="inline-flex items-center px-3 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+                            </svg>
+                            Back to Products
+                        </a>
+                        <button 
+                            onclick="logout()" 
+                            class="inline-flex items-center px-3 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                            </svg>
+                            Logout
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Loading State -->
+            <div id="loading" class="flex justify-center items-center py-12">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            </div>
+
+            <!-- Users Management -->
+            <div id="users-container" class="hidden">
+                <div class="bg-white rounded-lg shadow overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h2 class="text-lg font-medium text-gray-900">User Management</h2>
+                        <p class="mt-1 text-sm text-gray-500">Manage user roles and permissions</p>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Joined</th>
+                                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="users-table-body" class="bg-white divide-y divide-gray-200">
+                                <!-- Users will be populated here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Empty State -->
+            <div id="empty-state" class="hidden text-center py-12">
+                <div class="mx-auto h-24 w-24 text-gray-400">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-full h-full">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
+                    </svg>
+                </div>
+                <h3 class="mt-4 text-lg font-medium text-gray-900">No users found</h3>
+                <p class="mt-2 text-sm text-gray-500">There are no users to manage at this time.</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
+    <script>
+        let users = [];
+
+        // Load users on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUsers();
+        });
+
+        // API Functions
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/admin/users');
+                const result = await response.json();
+                
+                if (result.success) {
+                    users = result.data || [];
+                    renderUsers();
+                } else {
+                    if (response.status === 403) {
+                        showToast('Access denied. Admin rights required.', 'error');
+                        setTimeout(() => {
+                            window.location.href = '/';
+                        }, 2000);
+                    } else {
+                        showToast('Error loading users: ' + result.message, 'error');
+                    }
+                }
+            } catch (error) {
+                showToast('Error loading users: ' + error.message, 'error');
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        }
+
+        async function toggleUserAdmin(userId, username, isCurrentlyAdmin) {
+            const action = isCurrentlyAdmin ? 'remove admin rights from' : 'grant admin rights to';
+            
+            if (!confirm(`Are you sure you want to ${action} "${username}"?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/admin/users/${userId}/admin`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        is_admin: !isCurrentlyAdmin
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast(result.message, 'success');
+                    loadUsers(); // Reload users to reflect changes
+                } else {
+                    showToast('Error updating user: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showToast('Error updating user: ' + error.message, 'error');
+            }
+        }
+
+        async function logout() {
+            try {
+                const response = await fetch('/auth/logout', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast('Logged out successfully!', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 1000);
+                } else {
+                    showToast('Logout failed: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showToast('Logout error: ' + error.message, 'error');
+            }
+        }
+
+        // UI Functions
+        function renderUsers() {
+            const container = document.getElementById('users-container');
+            const emptyState = document.getElementById('empty-state');
+            const tbody = document.getElementById('users-table-body');
+
+            if (users.length === 0) {
+                container.classList.add('hidden');
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            container.classList.remove('hidden');
+            emptyState.classList.add('hidden');
+
+            tbody.innerHTML = users.map(user => `
+                <tr class="hover:bg-gray-50">
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${user.id}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${user.username}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${user.email}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full ${user.is_admin ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'}">
+                            ${user.is_admin ? 'Admin' : 'User'}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        ${new Date(user.created).toLocaleDateString()}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <button onclick="toggleUserAdmin(${user.id}, '${user.username.replace(/'/g, "\\'")}', ${user.is_admin})" 
+                                class="text-blue-600 hover:text-blue-900 transition-colors">
+                            ${user.is_admin ? 'Remove Admin' : 'Make Admin'}
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            const bgColor = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+            
+            toast.className = `${bgColor} text-white px-6 py-3 rounded-lg shadow-lg transform translate-x-full transition-transform duration-300`;
+            toast.textContent = message;
+            
+            container.appendChild(toast);
+            
+            // Animate in
+            setTimeout(() => {
+                toast.classList.remove('translate-x-full');
+            }, 100);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                toast.classList.add('translate-x-full');
+                setTimeout(() => {
+                    container.removeChild(toast);
+                }, 300);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

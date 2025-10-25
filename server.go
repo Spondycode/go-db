@@ -17,14 +17,146 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Role constants
+const (
+	RoleAdmin     = "admin"
+	RoleAssistant = "assistant"
+	RoleUser      = "user"
+)
+
+// Permission constants
+const (
+	PermissionViewProducts   = "view_products"
+	PermissionAddProducts    = "add_products"
+	PermissionEditProducts   = "edit_products"
+	PermissionDeleteProducts = "delete_products"
+	PermissionManageUsers    = "manage_users"
+	PermissionManageRoles    = "manage_roles"
+)
+
+// RoleDefinition represents a role with its permissions
+type RoleDefinition struct {
+	Name        string   `json:"name"`
+	DisplayName string   `json:"display_name"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+	Color       string   `json:"color"` // For UI display
+}
+
+// GetDefaultRoleDefinitions returns the default role definitions
+func GetDefaultRoleDefinitions() map[string]RoleDefinition {
+	return map[string]RoleDefinition{
+		RoleAdmin: {
+			Name:        RoleAdmin,
+			DisplayName: "Administrator",
+			Description: "Full system access with user and role management capabilities",
+			Permissions: []string{
+				PermissionViewProducts,
+				PermissionAddProducts,
+				PermissionEditProducts,
+				PermissionDeleteProducts,
+				PermissionManageUsers,
+				PermissionManageRoles,
+			},
+			Color: "purple",
+		},
+		RoleAssistant: {
+			Name:        RoleAssistant,
+			DisplayName: "Assistant",
+			Description: "Can view and edit products but cannot add or delete them",
+			Permissions: []string{
+				PermissionViewProducts,
+				PermissionEditProducts,
+			},
+			Color: "blue",
+		},
+		RoleUser: {
+			Name:        RoleUser,
+			DisplayName: "User",
+			Description: "Read-only access to view products",
+			Permissions: []string{
+				PermissionViewProducts,
+			},
+			Color: "gray",
+		},
+	}
+}
+
 // User represents a user in the database
 type User struct {
 	ID       int       `json:"id"`
 	Username string    `json:"username"`
 	Email    string    `json:"email"`
-	Password string    `json:"-"` // Don't expose password in JSON
-	IsAdmin  bool      `json:"is_admin"`
+	Password string    `json:"-"`        // Don't expose password in JSON
+	Role     string    `json:"role"`     // "admin", "assistant", "user"
+	IsAdmin  bool      `json:"is_admin"` // Computed field for backward compatibility
 	Created  time.Time `json:"created"`
+}
+
+// IsAdminRole checks if user has admin role
+func (u *User) IsAdminRole() bool {
+	return u.Role == RoleAdmin
+}
+
+// IsAssistantRole checks if user has assistant role
+func (u *User) IsAssistantRole() bool {
+	return u.Role == RoleAssistant
+}
+
+// HasPermission checks if user has a specific permission
+func (u *User) HasPermission(permission string) bool {
+	roleDefinitions := GetDefaultRoleDefinitions()
+	roleDef, exists := roleDefinitions[u.Role]
+	if !exists {
+		return false
+	}
+
+	for _, perm := range roleDef.Permissions {
+		if perm == permission {
+			return true
+		}
+	}
+	return false
+}
+
+// CanViewProducts checks if user can view products
+func (u *User) CanViewProducts() bool {
+	return u.HasPermission(PermissionViewProducts)
+}
+
+// CanEditProducts checks if user can edit products
+func (u *User) CanEditProducts() bool {
+	return u.HasPermission(PermissionEditProducts)
+}
+
+// CanAddProducts checks if user can add products
+func (u *User) CanAddProducts() bool {
+	return u.HasPermission(PermissionAddProducts)
+}
+
+// CanDeleteProducts checks if user can delete products
+func (u *User) CanDeleteProducts() bool {
+	return u.HasPermission(PermissionDeleteProducts)
+}
+
+// CanManageUsers checks if user can manage other users
+func (u *User) CanManageUsers() bool {
+	return u.HasPermission(PermissionManageUsers)
+}
+
+// CanManageRoles checks if user can manage role definitions
+func (u *User) CanManageRoles() bool {
+	return u.HasPermission(PermissionManageRoles)
+}
+
+// CanManageProducts checks if user can add/delete products (legacy method for backward compatibility)
+func (u *User) CanManageProducts() bool {
+	return u.CanAddProducts() && u.CanDeleteProducts()
+}
+
+// UpdateComputedFields updates computed fields like IsAdmin for backward compatibility
+func (u *User) UpdateComputedFields() {
+	u.IsAdmin = u.IsAdminRole()
 }
 
 // Server holds the database connection and templates
@@ -106,6 +238,10 @@ func (s *Server) setupRoutes() *mux.Router {
 	adminAPI := r.PathPrefix("/api/admin").Subrouter()
 	adminAPI.HandleFunc("/users", s.handleGetAllUsers).Methods("GET")
 	adminAPI.HandleFunc("/users/{id:[0-9]+}/admin", s.handleSetUserAdmin).Methods("PUT")
+	adminAPI.HandleFunc("/users/{id:[0-9]+}/role", s.handleSetUserRole).Methods("PUT")
+	adminAPI.HandleFunc("/roles", s.handleGetRoleDefinitions).Methods("GET")
+	adminAPI.HandleFunc("/roles/{name}", s.handleUpdateRoleDefinition).Methods("PUT")
+	adminAPI.HandleFunc("/permissions", s.handleGetAllPermissions).Methods("GET")
 
 	// API routes
 	api := r.PathPrefix("/api").Subrouter()
@@ -219,8 +355,28 @@ func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 	s.sendJSONResponse(w, http.StatusCreated, true, "Product created successfully", product)
 }
 
-// handleUpdateProduct updates an existing product
+// handleUpdateProduct updates an existing product (admin and assistant)
 func (s *Server) handleUpdateProduct(w http.ResponseWriter, r *http.Request) {
+	// Check authentication
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	_, ok := session.Values["user_id"].(int)
+	if !ok {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	// Check if user can edit products (admin or assistant)
+	role, ok := session.Values["role"].(string)
+	if !ok || (role != RoleAdmin && role != RoleAssistant) {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin or assistant rights required to edit products", nil)
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -378,6 +534,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	session.Values["user_id"] = user.ID
 	session.Values["username"] = user.Username
+	session.Values["role"] = user.Role
 	session.Values["is_admin"] = user.IsAdmin
 
 	if err := session.Save(r, w); err != nil {
@@ -440,13 +597,16 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 
 	// Create user
 	username := strings.TrimSpace(req.Username)
-	isAdmin := (username == "Spondycode") // Make Spondycode admin automatically
+	role := RoleUser // Default role
+	if username == "Spondycode" {
+		role = RoleAdmin // Make Spondycode admin automatically
+	}
 
 	user := &User{
 		Username: username,
 		Email:    strings.TrimSpace(req.Email),
 		Password: string(hashedPassword),
-		IsAdmin:  isAdmin,
+		Role:     role,
 	}
 
 	err = s.createUser(user)
@@ -466,6 +626,7 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 
 	session.Values["user_id"] = user.ID
 	session.Values["username"] = user.Username
+	session.Values["role"] = user.Role
 	session.Values["is_admin"] = user.IsAdmin
 
 	if err := session.Save(r, w); err != nil {
@@ -657,6 +818,67 @@ func (s *Server) handleSetUserAdmin(w http.ResponseWriter, r *http.Request) {
 	s.sendJSONResponse(w, http.StatusOK, true, fmt.Sprintf("Admin rights %s successfully", action), nil)
 }
 
+// handleSetUserRole sets the role for a user (admin only)
+func (s *Server) handleSetUserRole(w http.ResponseWriter, r *http.Request) {
+	// Check authentication and admin rights
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	role, ok := session.Values["role"].(string)
+	if !ok || role != RoleAdmin {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin rights required", nil)
+		return
+	}
+
+	// Get user ID from URL
+	vars := mux.Vars(r)
+	userID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusBadRequest, false, "Invalid user ID", nil)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.sendJSONResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
+		return
+	}
+
+	// Validate role
+	if req.Role != RoleUser && req.Role != RoleAssistant && req.Role != RoleAdmin {
+		s.sendJSONResponse(w, http.StatusBadRequest, false, "Invalid role. Must be 'user', 'assistant', or 'admin'", nil)
+		return
+	}
+
+	// Update user role
+	isAdmin := req.Role == RoleAdmin
+	query := `UPDATE users SET role = $1, is_admin = $2 WHERE id = $3;`
+	result, err := s.DB.Exec(query, req.Role, isAdmin, userID)
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusInternalServerError, false, "Failed to update user role", nil)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusInternalServerError, false, "Failed to update user role", nil)
+		return
+	}
+
+	if rowsAffected == 0 {
+		s.sendJSONResponse(w, http.StatusNotFound, false, "User not found", nil)
+		return
+	}
+
+	s.sendJSONResponse(w, http.StatusOK, true, fmt.Sprintf("User role updated to %s successfully", req.Role), nil)
+}
+
 // Database methods
 
 // getAllProducts retrieves all products from the database
@@ -750,59 +972,63 @@ func (s *Server) deleteProduct(id int) error {
 // getUserByUsername retrieves a user by username
 func (s *Server) getUserByUsername(username string) (*User, error) {
 	query := `
-	SELECT id, username, email, password, is_admin, created 
+	SELECT id, username, email, password, role, is_admin, created 
 	FROM users 
 	WHERE username = $1;`
 
 	var user User
-	err := s.DB.QueryRow(query, username).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.IsAdmin, &user.Created)
+	err := s.DB.QueryRow(query, username).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.Role, &user.IsAdmin, &user.Created)
 	if err != nil {
 		return nil, err
 	}
 
+	user.UpdateComputedFields()
 	return &user, nil
 }
 
 // getUserByEmail retrieves a user by email
 func (s *Server) getUserByEmail(email string) (*User, error) {
 	query := `
-	SELECT id, username, email, password, is_admin, created 
+	SELECT id, username, email, password, role, is_admin, created 
 	FROM users 
 	WHERE email = $1;`
 
 	var user User
-	err := s.DB.QueryRow(query, email).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.IsAdmin, &user.Created)
+	err := s.DB.QueryRow(query, email).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.Role, &user.IsAdmin, &user.Created)
 	if err != nil {
 		return nil, err
 	}
 
+	user.UpdateComputedFields()
 	return &user, nil
 }
 
 // getUserByID retrieves a user by ID
 func (s *Server) getUserByID(id int) (*User, error) {
 	query := `
-	SELECT id, username, email, password, is_admin, created 
+	SELECT id, username, email, password, role, is_admin, created 
 	FROM users 
 	WHERE id = $1;`
 
 	var user User
-	err := s.DB.QueryRow(query, id).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.IsAdmin, &user.Created)
+	err := s.DB.QueryRow(query, id).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.Role, &user.IsAdmin, &user.Created)
 	if err != nil {
 		return nil, err
 	}
 
+	user.UpdateComputedFields()
 	return &user, nil
 }
 
 // createUser inserts a new user into the database
 func (s *Server) createUser(user *User) error {
 	query := `
-	INSERT INTO users (username, email, password, is_admin) 
-	VALUES ($1, $2, $3, $4) 
+	INSERT INTO users (username, email, password, role, is_admin) 
+	VALUES ($1, $2, $3, $4, $5) 
 	RETURNING id, created;`
 
-	err := s.DB.QueryRow(query, user.Username, user.Email, user.Password, user.IsAdmin).Scan(&user.ID, &user.Created)
+	user.UpdateComputedFields()
+	err := s.DB.QueryRow(query, user.Username, user.Email, user.Password, user.Role, user.IsAdmin).Scan(&user.ID, &user.Created)
 	return err
 }
 
@@ -830,7 +1056,7 @@ func (s *Server) setUserAdmin(username string, isAdmin bool) error {
 // getAllUsers retrieves all users (admin only)
 func (s *Server) getAllUsers() ([]User, error) {
 	query := `
-	SELECT id, username, email, is_admin, created 
+	SELECT id, username, email, role, is_admin, created 
 	FROM users 
 	ORDER BY created DESC;`
 
@@ -843,10 +1069,11 @@ func (s *Server) getAllUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var user User
-		err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.IsAdmin, &user.Created)
+		err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.IsAdmin, &user.Created)
 		if err != nil {
 			return nil, err
 		}
+		user.UpdateComputedFields()
 		users = append(users, user)
 	}
 
@@ -924,6 +1151,7 @@ func createProductTableWeb(db *sql.DB) {
 
 // createUsersTable creates the users table if it doesn't exist
 func createUsersTable(db *sql.DB) {
+	// First create the table with the basic structure
 	query := `
 	CREATE TABLE IF NOT EXISTS users (
 		id SERIAL PRIMARY KEY,
@@ -937,6 +1165,35 @@ func createUsersTable(db *sql.DB) {
 	_, err := db.Exec(query)
 	if err != nil {
 		log.Fatal("Failed to create users table:", err)
+	}
+
+	// Add role column if it doesn't exist
+	addRoleColumn := `
+	DO $$ 
+	BEGIN 
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+					   WHERE table_name='users' AND column_name='role') THEN
+			ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user';
+		END IF;
+	END $$;`
+
+	_, err = db.Exec(addRoleColumn)
+	if err != nil {
+		log.Fatal("Failed to add role column:", err)
+	}
+
+	// Migrate existing data: set role based on is_admin
+	migrateRoles := `
+	UPDATE users 
+	SET role = CASE 
+		WHEN is_admin = true THEN 'admin' 
+		ELSE 'user' 
+	END 
+	WHERE role IS NULL OR role = 'user';`
+
+	_, err = db.Exec(migrateRoles)
+	if err != nil {
+		log.Printf("Warning: Failed to migrate roles: %v", err)
 	}
 
 	fmt.Println("✅ Users table ready!")
@@ -963,4 +1220,98 @@ func makeUserAdmin(db *sql.DB, username string) {
 	} else {
 		fmt.Printf("ℹ️  User %s not found (will be set as admin when they register)\n", username)
 	}
+}
+
+// handleGetRoleDefinitions returns all role definitions with their permissions
+func (s *Server) handleGetRoleDefinitions(w http.ResponseWriter, r *http.Request) {
+	// Check authentication and admin rights
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	isAdmin, ok := session.Values["is_admin"].(bool)
+	if !ok || !isAdmin {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin rights required to manage roles", nil)
+		return
+	}
+
+	roleDefinitions := GetDefaultRoleDefinitions()
+
+	s.sendJSONResponse(w, http.StatusOK, true, "Role definitions retrieved successfully", roleDefinitions)
+}
+
+// handleUpdateRoleDefinition updates a role definition (for future extensibility)
+func (s *Server) handleUpdateRoleDefinition(w http.ResponseWriter, r *http.Request) {
+	// Check authentication and admin rights
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	isAdmin, ok := session.Values["is_admin"].(bool)
+	if !ok || !isAdmin {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin rights required to manage roles", nil)
+		return
+	}
+
+	vars := mux.Vars(r)
+	roleName := vars["name"]
+
+	// For now, return message that role definitions are read-only
+	// This endpoint is prepared for future functionality
+	s.sendJSONResponse(w, http.StatusNotImplemented, false, "Role definition updates are not yet implemented. Currently using predefined roles: "+roleName, nil)
+}
+
+// handleGetAllPermissions returns all available permissions in the system
+func (s *Server) handleGetAllPermissions(w http.ResponseWriter, r *http.Request) {
+	// Check authentication and admin rights
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	isAdmin, ok := session.Values["is_admin"].(bool)
+	if !ok || !isAdmin {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin rights required to view permissions", nil)
+		return
+	}
+
+	permissions := []map[string]string{
+		{
+			"name":        PermissionViewProducts,
+			"display":     "View Products",
+			"description": "Ability to view and browse products",
+		},
+		{
+			"name":        PermissionAddProducts,
+			"display":     "Add Products",
+			"description": "Ability to create new products",
+		},
+		{
+			"name":        PermissionEditProducts,
+			"display":     "Edit Products",
+			"description": "Ability to modify existing products",
+		},
+		{
+			"name":        PermissionDeleteProducts,
+			"display":     "Delete Products",
+			"description": "Ability to remove products from the system",
+		},
+		{
+			"name":        PermissionManageUsers,
+			"display":     "Manage Users",
+			"description": "Ability to view and modify user accounts",
+		},
+		{
+			"name":        PermissionManageRoles,
+			"display":     "Manage Roles",
+			"description": "Ability to view and modify role definitions",
+		},
+	}
+
+	s.sendJSONResponse(w, http.StatusOK, true, "Permissions retrieved successfully", permissions)
 }

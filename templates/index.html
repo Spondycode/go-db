@@ -265,10 +265,17 @@
             const adminLink = document.getElementById('admin-link');
             const addProductBtn = document.getElementById('add-product-btn');
             
-            userWelcome.textContent = `Welcome, ${currentUser.username}${currentUser.is_admin ? ' (Admin)' : ''}`;
+            let roleDisplay = '';
+            if (currentUser.role === 'admin') {
+                roleDisplay = ' (Admin)';
+            } else if (currentUser.role === 'assistant') {
+                roleDisplay = ' (Assistant)';
+            }
+            
+            userWelcome.textContent = `Welcome, ${currentUser.username}${roleDisplay}`;
             
             // Show admin-only elements if user is admin
-            if (currentUser.is_admin) {
+            if (currentUser.role === 'admin') {
                 adminLink.classList.remove('hidden');
                 adminLink.classList.add('inline-flex');
                 addProductBtn.classList.remove('hidden');
@@ -492,13 +499,17 @@
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         ${currentUser ? `
-                            <button onclick="openEditModal(${product.id})" 
-                                    class="text-blue-600 hover:text-blue-900 mr-3 transition-colors">Edit</button>
-                            ${currentUser.is_admin ? `
+                            ${(currentUser.role === 'admin' || currentUser.role === 'assistant') ? `
+                                <button onclick="openEditModal(${product.id})" 
+                                        class="text-blue-600 hover:text-blue-900 mr-3 transition-colors">Edit</button>
+                            ` : ''}
+                            ${currentUser.role === 'admin' ? `
                                 <button onclick="deleteProduct(${product.id}, '${product.name.replace(/'/g, "\\'")}')" 
                                         class="text-red-600 hover:text-red-900 transition-colors">Delete</button>
-                            ` : `
+                            ` : currentUser.role === 'assistant' ? `
                                 <span class="text-gray-400">Admin only</span>
+                            ` : `
+                                <span class="text-gray-400">Staff only</span>
                             `}
                         ` : `
                             <span class="text-gray-400">Login to manage</span>
@@ -514,7 +525,7 @@
                 return;
             }
             
-            if (!currentUser.is_admin) {
+            if (currentUser.role !== 'admin') {
                 showToast('Admin rights required to add products', 'error');
                 return;
             }
@@ -529,6 +540,11 @@
         function openEditModal(id) {
             if (!currentUser) {
                 showToast('Please log in to edit products', 'error');
+                return;
+            }
+            
+            if (currentUser.role !== 'admin' && currentUser.role !== 'assistant') {
+                showToast('Staff privileges required to edit products', 'error');
                 return;
             }
 

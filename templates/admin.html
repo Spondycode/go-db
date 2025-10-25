@@ -8,6 +8,29 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .tab-button.active {
+            background-color: #2563eb !important;
+            color: white !important;
+            border-color: #2563eb !important;
+        }
+        .tab-button:not(.active) {
+            background-color: white !important;
+            color: #374151 !important;
+            border-color: #d1d5db !important;
+        }
+        .tab-button:not(.active):hover {
+            background-color: #f9fafb !important;
+            border-color: #9ca3af !important;
+        }
+        .tab-content {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
 </head>
 <body class="h-full bg-gray-50">
     <div class="min-h-full">
@@ -41,13 +64,33 @@
 
         <!-- Main Content -->
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Navigation Tabs -->
+            <div class="mb-8">
+                <nav class="flex space-x-12">
+                    <button onclick="showTab('users')" id="users-tab" 
+                        class="tab-button active flex items-center px-6 py-3 text-base font-semibold text-white bg-blue-600 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
+                        </svg>
+                        Users
+                    </button>
+                    <button onclick="showTab('roles')" id="roles-tab" 
+                        class="tab-button flex items-center px-6 py-3 text-base font-semibold text-gray-700 bg-white border-2 border-gray-300 rounded-lg shadow-md hover:bg-gray-50 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                        </svg>
+                        Roles & Permissions
+                    </button>
+                </nav>
+            </div>
+
             <!-- Loading State -->
             <div id="loading" class="flex justify-center items-center py-12">
                 <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
             </div>
 
             <!-- Users Management -->
-            <div id="users-container" class="hidden">
+            <div id="users-container" class="hidden tab-content">
                 <div class="bg-white rounded-lg shadow overflow-hidden">
                     <div class="px-6 py-4 border-b border-gray-200">
                         <h2 class="text-lg font-medium text-gray-900">User Management</h2>
@@ -74,6 +117,35 @@
                 </div>
             </div>
 
+            <!-- Roles & Permissions Management -->
+            <div id="roles-container" class="hidden tab-content">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Role Definitions -->
+                    <div class="bg-white rounded-lg shadow overflow-hidden">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-medium text-gray-900">Role Definitions</h2>
+                            <p class="mt-1 text-sm text-gray-500">Current role definitions and their capabilities</p>
+                        </div>
+                        
+                        <div id="roles-list" class="p-6 space-y-4">
+                            <!-- Roles will be populated here -->
+                        </div>
+                    </div>
+
+                    <!-- Available Permissions -->
+                    <div class="bg-white rounded-lg shadow overflow-hidden">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-medium text-gray-900">Available Permissions</h2>
+                            <p class="mt-1 text-sm text-gray-500">System permissions that can be assigned to roles</p>
+                        </div>
+                        
+                        <div id="permissions-list" class="p-6 space-y-3">
+                            <!-- Permissions will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Empty State -->
             <div id="empty-state" class="hidden text-center py-12">
                 <div class="mx-auto h-24 w-24 text-gray-400">
@@ -92,11 +164,38 @@
 
     <script>
         let users = [];
+        let roles = {};
+        let permissions = [];
+        let currentTab = 'users';
 
-        // Load users on page load
+        // Load data on page load
         document.addEventListener('DOMContentLoaded', function() {
             loadUsers();
+            loadRoles();
+            loadPermissions();
+            showTab('users');
         });
+
+        // Tab Management
+        function showTab(tabName) {
+            currentTab = tabName;
+            
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            
+            // Update tab buttons - remove active state from all
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabName + '-container').classList.remove('hidden');
+            
+            // Add active state to selected tab
+            document.getElementById(tabName + '-tab').classList.add('active');
+        }
 
         // API Functions
         async function loadUsers() {
@@ -120,10 +219,93 @@
             } catch (error) {
                 showToast('Error loading users: ' + error.message, 'error');
             } finally {
-                document.getElementById('loading').classList.add('hidden');
+                if (currentTab === 'users') {
+                    document.getElementById('loading').classList.add('hidden');
+                }
             }
         }
 
+        async function loadRoles() {
+            try {
+                const response = await fetch('/api/admin/roles');
+                const result = await response.json();
+                
+                if (result.success) {
+                    roles = result.data || {};
+                    renderRoles();
+                } else {
+                    showToast('Error loading roles: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showToast('Error loading roles: ' + error.message, 'error');
+            }
+        }
+
+        async function loadPermissions() {
+            try {
+                const response = await fetch('/api/admin/permissions');
+                const result = await response.json();
+                
+                if (result.success) {
+                    permissions = result.data || [];
+                    renderPermissions();
+                } else {
+                    showToast('Error loading permissions: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showToast('Error loading permissions: ' + error.message, 'error');
+            }
+        }
+
+        async function changeUserRole(userId, username, newRole, currentRole) {
+            if (newRole === currentRole) {
+                return; // No change
+            }
+
+            const roleNames = {
+                'user': 'User',
+                'assistant': 'Assistant', 
+                'admin': 'Admin'
+            };
+
+            if (!confirm(`Are you sure you want to change "${username}" from ${roleNames[currentRole]} to ${roleNames[newRole]}?`)) {
+                // Reset the select if cancelled
+                const select = event.target;
+                select.value = currentRole;
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/admin/users/${userId}/role`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        role: newRole
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast(result.message, 'success');
+                    loadUsers(); // Reload users to reflect changes
+                } else {
+                    showToast('Error updating user role: ' + result.message, 'error');
+                    // Reset the select on error
+                    const select = event.target;
+                    select.value = currentRole;
+                }
+            } catch (error) {
+                showToast('Error updating user role: ' + error.message, 'error');
+                // Reset the select on error
+                const select = event.target;
+                select.value = currentRole;
+            }
+        }
+
+        // Keep the old function for backward compatibility with the admin toggle API
         async function toggleUserAdmin(userId, username, isCurrentlyAdmin) {
             const action = isCurrentlyAdmin ? 'remove admin rights from' : 'grant admin rights to';
             
@@ -184,12 +366,12 @@
 
             if (users.length === 0) {
                 container.classList.add('hidden');
-                emptyState.classList.remove('hidden');
+                if (emptyState) emptyState.classList.remove('hidden');
                 return;
             }
 
             container.classList.remove('hidden');
-            emptyState.classList.add('hidden');
+            if (emptyState) emptyState.classList.add('hidden');
 
             tbody.innerHTML = users.map(user => `
                 <tr class="hover:bg-gray-50">
@@ -197,21 +379,83 @@
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${user.username}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${user.email}</td>
                     <td class="px-6 py-4 whitespace-nowrap">
-                        <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full ${user.is_admin ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'}">
-                            ${user.is_admin ? 'Admin' : 'User'}
+                        <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 
+                            user.role === 'assistant' ? 'bg-blue-100 text-blue-800' : 
+                            'bg-gray-100 text-gray-800'
+                        }">
+                            ${user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                         </span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         ${new Date(user.created).toLocaleDateString()}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <button onclick="toggleUserAdmin(${user.id}, '${user.username.replace(/'/g, "\\'")}', ${user.is_admin})" 
-                                class="text-blue-600 hover:text-blue-900 transition-colors">
-                            ${user.is_admin ? 'Remove Admin' : 'Make Admin'}
-                        </button>
+                        <select onchange="changeUserRole(${user.id}, '${user.username.replace(/'/g, "\\'")}', this.value, '${user.role}')" 
+                                class="text-sm border border-gray-300 rounded px-2 py-1 focus:ring-blue-500 focus:border-blue-500">
+                            <option value="user" ${user.role === 'user' ? 'selected' : ''}>User</option>
+                            <option value="assistant" ${user.role === 'assistant' ? 'selected' : ''}>Assistant</option>
+                            <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+                        </select>
                     </td>
                 </tr>
             `).join('');
+        }
+
+        function renderRoles() {
+            const container = document.getElementById('roles-list');
+            
+            container.innerHTML = Object.values(roles).map(role => `
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center">
+                            <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                role.color === 'purple' ? 'bg-purple-100 text-purple-800' : 
+                                role.color === 'blue' ? 'bg-blue-100 text-blue-800' : 
+                                'bg-gray-100 text-gray-800'
+                            }">
+                                ${role.display_name}
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <p class="text-sm text-gray-600 mb-3">${role.description}</p>
+                    
+                    <div>
+                        <h4 class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Permissions</h4>
+                        <div class="flex flex-wrap gap-1">
+                            ${role.permissions.map(permission => `
+                                <span class="inline-flex px-2 py-1 text-xs bg-green-100 text-green-800 rounded">
+                                    ${formatPermissionName(permission)}
+                                </span>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderPermissions() {
+            const container = document.getElementById('permissions-list');
+            
+            container.innerHTML = permissions.map(permission => `
+                <div class="flex items-start p-3 border border-gray-200 rounded-lg">
+                    <div class="flex-1">
+                        <div class="flex items-center">
+                            <span class="inline-flex px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded mr-3">
+                                ${permission.display}
+                            </span>
+                        </div>
+                        <p class="text-sm text-gray-600 mt-1">${permission.description}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function formatPermissionName(permission) {
+            return permission.replace('_', ' ').split(' ').map(word => 
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ');
         }
 
         function showToast(message, type = 'info') {

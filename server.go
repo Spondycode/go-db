@@ -17,6 +17,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Global role definitions - can be modified at runtime
+var roleDefinitions map[string]RoleDefinition
+
 // Role constants
 const (
 	RoleAdmin     = "admin"
@@ -63,9 +66,10 @@ func GetDefaultRoleDefinitions() map[string]RoleDefinition {
 		RoleAssistant: {
 			Name:        RoleAssistant,
 			DisplayName: "Assistant",
-			Description: "Can view and edit products but cannot add or delete them",
+			Description: "Can view, add, and edit products but cannot delete them",
 			Permissions: []string{
 				PermissionViewProducts,
+				PermissionAddProducts,
 				PermissionEditProducts,
 			},
 			Color: "blue",
@@ -80,6 +84,39 @@ func GetDefaultRoleDefinitions() map[string]RoleDefinition {
 			Color: "gray",
 		},
 	}
+}
+
+// InitializeRoleDefinitions initializes the global role definitions
+func InitializeRoleDefinitions() {
+	if roleDefinitions == nil {
+		roleDefinitions = GetDefaultRoleDefinitions()
+	}
+}
+
+// GetCurrentRoleDefinitions returns the current role definitions
+func GetCurrentRoleDefinitions() map[string]RoleDefinition {
+	if roleDefinitions == nil {
+		InitializeRoleDefinitions()
+	}
+	return roleDefinitions
+}
+
+// UpdateRoleDefinition updates a role's permissions
+func UpdateRoleDefinition(roleName string, permissions []string) error {
+	if roleDefinitions == nil {
+		InitializeRoleDefinitions()
+	}
+
+	role, exists := roleDefinitions[roleName]
+	if !exists {
+		return fmt.Errorf("role %s does not exist", roleName)
+	}
+
+	// Update the permissions
+	role.Permissions = permissions
+	roleDefinitions[roleName] = role
+
+	return nil
 }
 
 // User represents a user in the database
@@ -105,11 +142,14 @@ func (u *User) IsAssistantRole() bool {
 
 // HasPermission checks if user has a specific permission
 func (u *User) HasPermission(permission string) bool {
-	roleDefinitions := GetDefaultRoleDefinitions()
+	roleDefinitions := GetCurrentRoleDefinitions()
 	roleDef, exists := roleDefinitions[u.Role]
 	if !exists {
+		log.Printf("Role definition not found for role: %s", u.Role)
 		return false
 	}
+
+	log.Printf("Checking permission '%s' for role '%s', available permissions: %v", permission, u.Role, roleDef.Permissions)
 
 	for _, perm := range roleDef.Permissions {
 		if perm == permission {
@@ -117,9 +157,7 @@ func (u *User) HasPermission(permission string) bool {
 		}
 	}
 	return false
-}
-
-// CanViewProducts checks if user can view products
+} // CanViewProducts checks if user can view products
 func (u *User) CanViewProducts() bool {
 	return u.HasPermission(PermissionViewProducts)
 }
@@ -233,6 +271,7 @@ func (s *Server) setupRoutes() *mux.Router {
 	auth.HandleFunc("/signup", s.handleSignup).Methods("POST")
 	auth.HandleFunc("/logout", s.handleLogout).Methods("POST")
 	auth.HandleFunc("/me", s.handleGetCurrentUser).Methods("GET")
+	auth.HandleFunc("/permissions", s.handleGetCurrentUserPermissions).Methods("GET")
 
 	// Admin API routes
 	adminAPI := r.PathPrefix("/api/admin").Subrouter()
@@ -304,22 +343,31 @@ func (s *Server) handleGetProduct(w http.ResponseWriter, r *http.Request) {
 
 // handleCreateProduct creates a new product (admin only)
 func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
-	// Check authentication and admin rights
+	// Check authentication
 	session, err := s.Store.Get(r, "session-name")
 	if err != nil {
 		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
 		return
 	}
 
-	_, ok := session.Values["user_id"].(int)
+	userID, ok := session.Values["user_id"].(int)
 	if !ok {
 		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
 		return
 	}
 
-	isAdmin, ok := session.Values["is_admin"].(bool)
-	if !ok || !isAdmin {
-		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin rights required to add products", nil)
+	// Get user and check permissions
+	user, err := s.getUserByID(userID)
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "User not found", nil)
+		return
+	}
+
+	// Debug logging
+	log.Printf("Create Product - User: %s, Role: %s, Can Add: %v", user.Username, user.Role, user.CanAddProducts())
+
+	if !user.CanAddProducts() {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "You do not have permission to add products", nil)
 		return
 	}
 
@@ -364,16 +412,21 @@ func (s *Server) handleUpdateProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, ok := session.Values["user_id"].(int)
+	userID, ok := session.Values["user_id"].(int)
 	if !ok {
 		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
 		return
 	}
 
-	// Check if user can edit products (admin or assistant)
-	role, ok := session.Values["role"].(string)
-	if !ok || (role != RoleAdmin && role != RoleAssistant) {
-		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin or assistant rights required to edit products", nil)
+	// Get user and check permissions
+	user, err := s.getUserByID(userID)
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "User not found", nil)
+		return
+	}
+
+	if !user.CanEditProducts() {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "You do not have permission to edit products", nil)
 		return
 	}
 
@@ -423,22 +476,28 @@ func (s *Server) handleUpdateProduct(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteProduct deletes a product (admin only)
 func (s *Server) handleDeleteProduct(w http.ResponseWriter, r *http.Request) {
-	// Check authentication and admin rights
+	// Check authentication
 	session, err := s.Store.Get(r, "session-name")
 	if err != nil {
 		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
 		return
 	}
 
-	_, ok := session.Values["user_id"].(int)
+	userID, ok := session.Values["user_id"].(int)
 	if !ok {
 		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
 		return
 	}
 
-	isAdmin, ok := session.Values["is_admin"].(bool)
-	if !ok || !isAdmin {
-		s.sendJSONResponse(w, http.StatusForbidden, false, "Admin rights required to delete products", nil)
+	// Get user and check permissions
+	user, err := s.getUserByID(userID)
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "User not found", nil)
+		return
+	}
+
+	if !user.CanDeleteProducts() {
+		s.sendJSONResponse(w, http.StatusForbidden, false, "You do not have permission to delete products", nil)
 		return
 	}
 
@@ -681,9 +740,59 @@ func (s *Server) handleGetCurrentUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Remove password from response
-	user.Password = ""
-	s.sendJSONResponse(w, http.StatusOK, true, "User retrieved successfully", user)
+	// Add current permissions to user object
+	roleDefinitions := GetCurrentRoleDefinitions()
+	if roleDef, exists := roleDefinitions[user.Role]; exists {
+		user.Password = "" // Remove password from response
+
+		// Create response with permissions
+		userWithPermissions := map[string]interface{}{
+			"id":          user.ID,
+			"username":    user.Username,
+			"email":       user.Email,
+			"role":        user.Role,
+			"is_admin":    user.IsAdmin,
+			"created":     user.Created,
+			"permissions": roleDef.Permissions,
+		}
+		s.sendJSONResponse(w, http.StatusOK, true, "User retrieved successfully", userWithPermissions)
+	} else {
+		// Fallback if role not found
+		user.Password = ""
+		s.sendJSONResponse(w, http.StatusOK, true, "User retrieved successfully", user)
+	}
+}
+
+// handleGetCurrentUserPermissions returns the current user's permissions
+func (s *Server) handleGetCurrentUserPermissions(w http.ResponseWriter, r *http.Request) {
+	session, err := s.Store.Get(r, "session-name")
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	userID, ok := session.Values["user_id"].(int)
+	if !ok {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "Not authenticated", nil)
+		return
+	}
+
+	user, err := s.getUserByID(userID)
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusUnauthorized, false, "User not found", nil)
+		return
+	}
+
+	// Get current permissions for user's role
+	roleDefinitions := GetCurrentRoleDefinitions()
+	if roleDef, exists := roleDefinitions[user.Role]; exists {
+		s.sendJSONResponse(w, http.StatusOK, true, "Permissions retrieved successfully", map[string]interface{}{
+			"role":        user.Role,
+			"permissions": roleDef.Permissions,
+		})
+	} else {
+		s.sendJSONResponse(w, http.StatusInternalServerError, false, "Role definition not found", nil)
+	}
 }
 
 // handleAdminPage serves the admin page
@@ -1096,6 +1205,9 @@ func (s *Server) sendJSONResponse(w http.ResponseWriter, statusCode int, success
 
 // StartWebServer starts the web server
 func StartWebServer() {
+	// Initialize role definitions
+	InitializeRoleDefinitions()
+
 	// Database connection
 	connStr := "postgres://postgres:secret@localhost:5432/gopgtest?sslmode=disable"
 	db, err := sql.Open("postgres", connStr)
@@ -1237,12 +1349,10 @@ func (s *Server) handleGetRoleDefinitions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	roleDefinitions := GetDefaultRoleDefinitions()
+	roleDefinitions := GetCurrentRoleDefinitions()
 
 	s.sendJSONResponse(w, http.StatusOK, true, "Role definitions retrieved successfully", roleDefinitions)
-}
-
-// handleUpdateRoleDefinition updates a role definition (for future extensibility)
+} // handleUpdateRoleDefinition updates a role definition's permissions
 func (s *Server) handleUpdateRoleDefinition(w http.ResponseWriter, r *http.Request) {
 	// Check authentication and admin rights
 	session, err := s.Store.Get(r, "session-name")
@@ -1260,9 +1370,61 @@ func (s *Server) handleUpdateRoleDefinition(w http.ResponseWriter, r *http.Reque
 	vars := mux.Vars(r)
 	roleName := vars["name"]
 
-	// For now, return message that role definitions are read-only
-	// This endpoint is prepared for future functionality
-	s.sendJSONResponse(w, http.StatusNotImplemented, false, "Role definition updates are not yet implemented. Currently using predefined roles: "+roleName, nil)
+	// Parse the request body
+	var requestData struct {
+		Permissions []string `json:"permissions"`
+	}
+
+	err = json.NewDecoder(r.Body).Decode(&requestData)
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusBadRequest, false, "Invalid request data", nil)
+		return
+	}
+
+	// Validate permissions
+	validPermissions := map[string]bool{
+		PermissionViewProducts:   true,
+		PermissionAddProducts:    true,
+		PermissionEditProducts:   true,
+		PermissionDeleteProducts: true,
+		PermissionManageUsers:    true,
+		PermissionManageRoles:    true,
+	}
+
+	for _, permission := range requestData.Permissions {
+		if !validPermissions[permission] {
+			s.sendJSONResponse(w, http.StatusBadRequest, false, "Invalid permission: "+permission, nil)
+			return
+		}
+	}
+
+	// Don't allow removing all permissions from admin role
+	if roleName == RoleAdmin {
+		if len(requestData.Permissions) == 0 {
+			s.sendJSONResponse(w, http.StatusBadRequest, false, "Admin role must have at least one permission", nil)
+			return
+		}
+		// Ensure admin always has manage_roles permission
+		hasManageRoles := false
+		for _, perm := range requestData.Permissions {
+			if perm == PermissionManageRoles {
+				hasManageRoles = true
+				break
+			}
+		}
+		if !hasManageRoles {
+			requestData.Permissions = append(requestData.Permissions, PermissionManageRoles)
+		}
+	}
+
+	// Update the role definition
+	err = UpdateRoleDefinition(roleName, requestData.Permissions)
+	if err != nil {
+		s.sendJSONResponse(w, http.StatusBadRequest, false, err.Error(), nil)
+		return
+	}
+
+	s.sendJSONResponse(w, http.StatusOK, true, "Role permissions updated successfully", nil)
 }
 
 // handleGetAllPermissions returns all available permissions in the system

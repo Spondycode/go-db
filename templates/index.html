@@ -258,6 +258,31 @@
             }
         }
 
+        // Permission helper functions
+        function hasPermission(permission) {
+            return currentUser && currentUser.permissions && currentUser.permissions.includes(permission);
+        }
+
+        function canViewProducts() {
+            return hasPermission('view_products');
+        }
+
+        function canAddProducts() {
+            return hasPermission('add_products');
+        }
+
+        function canEditProducts() {
+            return hasPermission('edit_products');
+        }
+
+        function canDeleteProducts() {
+            return hasPermission('delete_products');
+        }
+
+        function canManageUsers() {
+            return hasPermission('manage_users');
+        }
+
         function showUserSection() {
             const userSection = document.getElementById('user-section');
             const authSection = document.getElementById('auth-section');
@@ -274,15 +299,20 @@
             
             userWelcome.textContent = `Welcome, ${currentUser.username}${roleDisplay}`;
             
-            // Show admin-only elements if user is admin
-            if (currentUser.role === 'admin') {
+            // Show admin link if user can manage users
+            if (canManageUsers()) {
                 adminLink.classList.remove('hidden');
                 adminLink.classList.add('inline-flex');
-                addProductBtn.classList.remove('hidden');
-                addProductBtn.classList.add('inline-flex');
             } else {
                 adminLink.classList.add('hidden');
                 adminLink.classList.remove('inline-flex');
+            }
+            
+            // Show add product button if user can add products
+            if (canAddProducts()) {
+                addProductBtn.classList.remove('hidden');
+                addProductBtn.classList.add('inline-flex');
+            } else {
                 addProductBtn.classList.add('hidden');
                 addProductBtn.classList.remove('inline-flex');
             }
@@ -346,8 +376,8 @@
                 return;
             }
 
-            if (!currentUser.is_admin) {
-                showToast('Admin rights required to add products', 'error');
+            if (!canAddProducts()) {
+                showToast('You do not have permission to add products', 'error');
                 return;
             }
 
@@ -429,8 +459,8 @@
                 return;
             }
 
-            if (!currentUser.is_admin) {
-                showToast('Admin rights required to delete products', 'error');
+            if (!canDeleteProducts()) {
+                showToast('You do not have permission to delete products', 'error');
                 return;
             }
 
@@ -468,8 +498,8 @@
                 container.classList.add('hidden');
                 emptyState.classList.remove('hidden');
                 
-                // Show appropriate empty state based on user status
-                if (currentUser && currentUser.is_admin) {
+                // Show appropriate empty state based on user permissions
+                if (currentUser && canAddProducts()) {
                     addFirstBtn.classList.remove('hidden');
                     addFirstBtn.classList.add('inline-flex');
                     nonAdminMessage.classList.add('hidden');
@@ -499,15 +529,15 @@
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         ${currentUser ? `
-                            ${(currentUser.role === 'admin' || currentUser.role === 'assistant') ? `
+                            ${canEditProducts() ? `
                                 <button onclick="openEditModal(${product.id})" 
                                         class="text-blue-600 hover:text-blue-900 mr-3 transition-colors">Edit</button>
                             ` : ''}
-                            ${currentUser.role === 'admin' ? `
+                            ${canDeleteProducts() ? `
                                 <button onclick="deleteProduct(${product.id}, '${product.name.replace(/'/g, "\\'")}')" 
                                         class="text-red-600 hover:text-red-900 transition-colors">Delete</button>
-                            ` : currentUser.role === 'assistant' ? `
-                                <span class="text-gray-400">Admin only</span>
+                            ` : canEditProducts() ? `
+                                <span class="text-gray-400">Delete: Admin only</span>
                             ` : `
                                 <span class="text-gray-400">Staff only</span>
                             `}
@@ -525,8 +555,8 @@
                 return;
             }
             
-            if (currentUser.role !== 'admin') {
-                showToast('Admin rights required to add products', 'error');
+            if (!canAddProducts()) {
+                showToast('You do not have permission to add products', 'error');
                 return;
             }
             
@@ -543,8 +573,8 @@
                 return;
             }
             
-            if (currentUser.role !== 'admin' && currentUser.role !== 'assistant') {
-                showToast('Staff privileges required to edit products', 'error');
+            if (!canEditProducts()) {
+                showToast('You do not have permission to edit products', 'error');
                 return;
             }
 

@@ -402,6 +402,28 @@
             `).join('');
         }
 
+        function generateRoleDescription(role) {
+            const permissionDescriptions = {
+                'view_products': 'view products',
+                'add_products': 'add products',
+                'edit_products': 'edit products',
+                'delete_products': 'delete products',
+                'manage_users': 'manage users',
+                'manage_roles': 'manage roles'
+            };
+            
+            if (role.name === 'admin') {
+                return 'Full system access with user and role management capabilities';
+            }
+            
+            if (role.permissions.length === 0) {
+                return 'No permissions assigned';
+            }
+            
+            const capabilities = role.permissions.map(perm => permissionDescriptions[perm] || perm).join(', ');
+            return `Can ${capabilities}`;
+        }
+
         function renderRoles() {
             const container = document.getElementById('roles-list');
             
@@ -416,19 +438,53 @@
                             }">
                                 ${role.display_name}
                             </span>
+                            ${role.name !== 'admin' ? `
+                                <button onclick="toggleEditMode('${role.name}')" id="edit-btn-${role.name}"
+                                    class="ml-3 text-sm text-blue-600 hover:text-blue-800 transition-colors">
+                                    Edit Permissions
+                                </button>
+                            ` : ''}
                         </div>
                     </div>
                     
-                    <p class="text-sm text-gray-600 mb-3">${role.description}</p>
+                    <p class="text-sm text-gray-600 mb-3">${generateRoleDescription(role)}</p>
                     
                     <div>
                         <h4 class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Permissions</h4>
-                        <div class="flex flex-wrap gap-1">
+                        
+                        <!-- Display Mode -->
+                        <div id="permissions-display-${role.name}" class="flex flex-wrap gap-1">
                             ${role.permissions.map(permission => `
                                 <span class="inline-flex px-2 py-1 text-xs bg-green-100 text-green-800 rounded">
                                     ${formatPermissionName(permission)}
                                 </span>
                             `).join('')}
+                        </div>
+                        
+                        <!-- Edit Mode -->
+                        <div id="permissions-edit-${role.name}" class="hidden">
+                            <div class="space-y-2 mb-3">
+                                ${permissions.map(permission => `
+                                    <label class="flex items-center">
+                                        <input type="checkbox" 
+                                               id="perm-${role.name}-${permission.name}"
+                                               ${role.permissions.includes(permission.name) ? 'checked' : ''}
+                                               class="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                                        <span class="text-sm">${permission.display}</span>
+                                        <span class="text-xs text-gray-500 ml-2">${permission.description}</span>
+                                    </label>
+                                `).join('')}
+                            </div>
+                            <div class="flex space-x-2">
+                                <button onclick="saveRolePermissions('${role.name}')"
+                                    class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors">
+                                    Save
+                                </button>
+                                <button onclick="cancelEditMode('${role.name}')"
+                                    class="px-3 py-1 bg-gray-300 text-gray-700 text-sm rounded hover:bg-gray-400 transition-colors">
+                                    Cancel
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -456,6 +512,73 @@
             return permission.replace('_', ' ').split(' ').map(word => 
                 word.charAt(0).toUpperCase() + word.slice(1)
             ).join(' ');
+        }
+
+        // Role Permission Editing Functions
+        function toggleEditMode(roleName) {
+            const displayDiv = document.getElementById(`permissions-display-${roleName}`);
+            const editDiv = document.getElementById(`permissions-edit-${roleName}`);
+            const editBtn = document.getElementById(`edit-btn-${roleName}`);
+            
+            displayDiv.classList.add('hidden');
+            editDiv.classList.remove('hidden');
+            editBtn.textContent = 'Editing...';
+            editBtn.disabled = true;
+        }
+
+        function cancelEditMode(roleName) {
+            const displayDiv = document.getElementById(`permissions-display-${roleName}`);
+            const editDiv = document.getElementById(`permissions-edit-${roleName}`);
+            const editBtn = document.getElementById(`edit-btn-${roleName}`);
+            
+            // Reset checkboxes to original state
+            const role = roles[roleName];
+            permissions.forEach(permission => {
+                const checkbox = document.getElementById(`perm-${roleName}-${permission.name}`);
+                checkbox.checked = role.permissions.includes(permission.name);
+            });
+            
+            displayDiv.classList.remove('hidden');
+            editDiv.classList.add('hidden');
+            editBtn.textContent = 'Edit Permissions';
+            editBtn.disabled = false;
+        }
+
+        async function saveRolePermissions(roleName) {
+            const selectedPermissions = [];
+            permissions.forEach(permission => {
+                const checkbox = document.getElementById(`perm-${roleName}-${permission.name}`);
+                if (checkbox.checked) {
+                    selectedPermissions.push(permission.name);
+                }
+            });
+
+            try {
+                const response = await fetch(`/api/admin/roles/${roleName}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        permissions: selectedPermissions
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast('Role permissions updated successfully!', 'success');
+                    // Reload roles to reflect changes
+                    await loadRoles();
+                    renderRoles();
+                } else {
+                    showToast('Error updating role permissions: ' + result.message, 'error');
+                    cancelEditMode(roleName);
+                }
+            } catch (error) {
+                showToast('Error updating role permissions: ' + error.message, 'error');
+                cancelEditMode(roleName);
+            }
         }
 
         function showToast(message, type = 'info') {
